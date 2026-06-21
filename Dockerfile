@@ -60,10 +60,10 @@ RUN jar cf /work/patched.jar .
 #
 # OS (libsolv):
 #   CVE-2026-48863  CVE-2026-48864  CVE-2026-9149  CVE-2026-9150
-#   Fixed in 0.7.22-1.amzn2023.0.4 — dnf upgrade run with --refresh.
-#   NOTE: if the package is not yet in the AL2023 repo the upgrade is a no-op;
-#   the build still succeeds and the libsolv finding will clear once Amazon
-#   publishes the package to the public mirror.
+#   libsolv is only needed by dnf/rpm at build time — it is not used by OpenSearch
+#   at runtime.  We remove dnf, libdnf, libsolv and their Python bindings after all
+#   package operations are complete, which eliminates the CVE attack surface entirely
+#   rather than waiting for 0.7.22-1.amzn2023.0.4 to land in the AL2023 mirror.
 #
 # Java (io.netty:netty-handler 4.1.133.Final → 4.2.15.Final):
 #   CVE-2026-44249  CVE-2026-45416  CVE-2026-50010
@@ -79,11 +79,21 @@ USER root
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# libsolv OS CVEs — best-effort; no-op if 0.7.22-1.amzn2023.0.4 not yet published
-RUN dnf -y --refresh upgrade libsolv; \
-    echo "Installed libsolv: $(rpm -q libsolv)"; \
-    dnf clean all; \
-    rm -rf /var/cache/dnf
+# Use dnf for any remaining package upgrades, then remove it entirely.
+# This eliminates libsolv (CVE-2026-48863/48864/9149/9150) from the final image;
+# the package manager is never needed at runtime.
+RUN dnf -y --refresh upgrade \
+     && dnf clean all \
+     && rm -rf /var/cache/dnf \
+     && rpm -e --nodeps \
+          libsolv \
+          libdnf \
+          python3-dnf \
+          python3-libdnf \
+          dnf \
+          dnf-data \
+          2>/dev/null; \
+    echo "Remaining package-mgr packages: $(rpm -qa libsolv dnf libdnf 2>/dev/null | tr '\n' ' ' || echo none)"
 
 # netty-handler CVEs — standalone JARs: only replace the old 4.1.x version files;
 # already-patched 4.2.x files and proxy/other variants are skipped via exact glob
