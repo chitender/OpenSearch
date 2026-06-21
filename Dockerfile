@@ -24,15 +24,21 @@ RUN dnf -y upgrade libsolv && dnf clean all && rm -rf /var/cache/dnf
 # Fix netty-handler CVEs in bundled plugins (e.g. opensearch-security-analytics).
 # netty-handler-4.2.15.Final.jar is already present in modules/transport-netty4/,
 # so no external download is needed — we copy it over the vulnerable 4.1.x JARs.
+# Uses bash globs and parameter expansion only (no findutils required in minimal image).
 RUN set -eux; \
-    netty_src=$(find /usr/share/opensearch/modules/transport-netty4 -name "netty-handler-*.jar" | head -1); \
+    netty_src=''; \
+    for f in /usr/share/opensearch/modules/transport-netty4/netty-handler-*.jar; do \
+        [ -f "$f" ] && netty_src="$f" && break; \
+    done; \
     if [ -n "${netty_src}" ]; then \
-        find /usr/share/opensearch/plugins -name "netty-handler-*.jar" | while read vuln_jar; do \
-            echo "Replacing: ${vuln_jar} -> $(basename ${netty_src})"; \
-            dir=$(dirname "${vuln_jar}"); \
+        for vuln_jar in /usr/share/opensearch/plugins/*/netty-handler-*.jar; do \
+            [ -f "${vuln_jar}" ] || continue; \
+            plugin_dir="${vuln_jar%/*}"; \
+            jar_name="${netty_src##*/}"; \
+            echo "Replacing: ${vuln_jar} -> ${jar_name}"; \
             rm -f "${vuln_jar}"; \
-            cp "${netty_src}" "${dir}/"; \
-            chmod 644 "${dir}/$(basename ${netty_src})"; \
+            cp "${netty_src}" "${plugin_dir}/"; \
+            chmod 644 "${plugin_dir}/${jar_name}"; \
         done; \
     else \
         echo "WARNING: no netty-handler JAR found in transport-netty4 module"; \
