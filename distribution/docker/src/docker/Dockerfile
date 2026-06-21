@@ -55,6 +55,18 @@ RUN chmod 0775 config config/jvm.options.d data logs
 COPY config/opensearch.yml config/log4j2.properties config/
 RUN chmod 0660 config/opensearch.yml config/log4j2.properties
 
+# Patch CVE-2026-44249, CVE-2026-45416, CVE-2026-50010: replace vulnerable netty-handler
+# in any bundled plugins (e.g. security-analytics) with the patched version already present
+# in modules/transport-netty4 (io.netty:netty-handler upgraded to 4.2.15.Final).
+RUN netty_src=\$(find modules/transport-netty4 -name "netty-handler-*.jar" 2>/dev/null | head -1) ; \\
+    if [ -n "\${netty_src}" ]; then \\
+        find plugins -name "netty-handler-*.jar" 2>/dev/null | while read vuln_jar; do \\
+            plugin_dir=\$(dirname "\${vuln_jar}") ; \\
+            rm -f "\${vuln_jar}" ; \\
+            cp "\${netty_src}" "\${plugin_dir}/" ; \\
+        done ; \\
+    fi
+
 ################################################################################
 # Build stage 1 (the actual OpenSearch image):
 #
@@ -66,8 +78,12 @@ FROM ${base_image}
 
 ENV OPENSEARCH_CONTAINER true
 
+# CVE-2026-48863, CVE-2026-48864, CVE-2026-9149, CVE-2026-9150: libsolv stack/heap overflows
+# fixed in 0.7.22-1.amzn2023.0.4 — explicit upgrade ensures the patched version is installed
+# even when a cached base layer contains the vulnerable 0.7.22-1.amzn2023.0.3.
 RUN set -e \\
      && dnf -y update \\
+     && dnf -y upgrade libsolv \\
      && dnf -y install --setopt=tsflags=nodocs \\
           nmap-ncat shadow-utils zip unzip \\
      && dnf clean all \\
